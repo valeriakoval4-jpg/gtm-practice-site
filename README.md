@@ -45,7 +45,7 @@ python3 -m http.server 8000
 Все ecommerce-события — в формате GA4 (`ecommerce.items[]`), перед каждым идёт `{ecommerce: null}`.
 
 ## Что специально НЕ отслежено — настрой сама встроенными триггерами GTM
-- Подписка на рассылку на главной → триггер «Отправка формы» или «Видимость элемента» (`#newsletter-success`)
+- Подписка на рассылку: две формы — `#newsletter-form` (главная) и `#about-newsletter-form` (О нас), у обеих класс `newsletter-form`. Триггер «Отправка формы» (Form ID / Form Classes) или «Видимость элемента» (`#newsletter-success`, `#about-newsletter-success`)
 - Скачивание PDF → «Только ссылки», Click URL содержит `.pdf`
 - Клики по `tel:`, `mailto:`, WhatsApp, Telegram, соцсетям в футере (исходящие ссылки)
 - Вкладки «Описание / Уход / Доставка» на карточке товара → «Все элементы» + Click Text

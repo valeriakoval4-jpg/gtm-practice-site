@@ -159,15 +159,22 @@ pages.home = function () {
   pushEcommerce('view_promotion', { items: [promo] });
   $('#promo-link').addEventListener('click', function () { pushEcommerce('select_promotion', { items: [promo] }); });
 
-  // Подписка на рассылку: специально БЕЗ dataLayer-события.
-  // Попробуй отследить её сама: триггер «Отправка формы» или «Видимость элемента» (.success)
-  $('#newsletter-form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var email = $('#newsletter-email');
-    if (!/^\S+@\S+\.\S+$/.test(email.value)) { email.focus(); toast('Введите корректный email'); return; }
-    this.outerHTML = '<p class="success" id="newsletter-success">🎉 Спасибо! Вы подписаны на рассылку.</p>';
-  });
+  initNewsletter('newsletter-form', 'newsletter-success');
 };
+
+// Подписка на рассылку: специально БЕЗ dataLayer-события.
+// Попробуй отследить её сама: триггер «Отправка формы» или «Видимость элемента» (.success)
+// Формы: #newsletter-form (главная) и #about-newsletter-form (О нас), у обеих класс .newsletter-form
+function initNewsletter(formId, successId) {
+  var form = document.getElementById(formId);
+  if (!form) return;
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var email = form.querySelector('input[type=email]');
+    if (!/^\S+@\S+\.\S+$/.test(email.value)) { email.focus(); toast('Введите корректный email'); return; }
+    form.outerHTML = '<p class="success" id="' + successId + '">🎉 Спасибо! Вы подписаны на рассылку.</p>';
+  });
+}
 
 pages.catalog = function () {
   var cats = ['Все'].concat(PRODUCTS.map(function (p) { return p.category; }).filter(function (c, i, a) { return a.indexOf(c) === i; }));
@@ -350,7 +357,9 @@ pages.contact = function () {
   });
 };
 
-pages.about = function () {};
+pages.about = function () {
+  initNewsletter('about-newsletter-form', 'about-newsletter-success');
+};
 
 /* ---------- validation ---------- */
 function validate(form) {
