@@ -196,3 +196,25 @@ summary { font-weight: 700; cursor: pointer; }
   .nav { order: 3; flex-basis: 100%; gap: 14px; font-size: .95rem; }
   .cart-table th:nth-child(2), .cart-table td:nth-child(2) { display: none; }
 }
+
+/* Cookie banner */
+.consent-banner {
+  position: fixed; left: 16px; bottom: 16px; z-index: 90; width: min(460px, calc(100vw - 32px));
+  background: var(--surface); border-radius: var(--radius); box-shadow: 0 12px 40px rgba(46, 58, 47, .22);
+  padding: 22px 22px 18px; display: none;
+}
+.consent-banner.show { display: block; animation: consent-in .25s ease-out; }
+@keyframes consent-in { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+.consent-banner h3 { margin: 0 0 6px; font-size: 1.15rem; }
+.consent-banner p { margin: 0 0 14px; color: var(--muted); font-size: .93rem; }
+.consent-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.consent-options[hidden], .consent-buttons [hidden] { display: none; }
+.consent-option { display: flex; gap: 10px; align-items: flex-start; border: 2px solid var(--border); border-radius: 12px; padding: 10px 12px; margin: 0; cursor: pointer; font-weight: 400; }
+.consent-option input { margin-top: 4px; accent-color: var(--green); width: 16px; height: 16px; }
+.consent-option b { display: block; }
+.consent-option small { color: var(--muted); }
+.consent-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .consent-banner { left: 8px; right: 8px; bottom: 8px; width: auto; }
+  body.consent-open .dl-panel { bottom: auto; top: 110px; }
+}

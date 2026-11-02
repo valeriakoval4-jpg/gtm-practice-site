@@ -7,7 +7,14 @@ var SITE_CONFIG = {
   // как только впишешь GTM-ID, этот код отключится и GA4 нужно будет настроить тегом в GTM
   GA4_ID: 'G-EK6764V55Q',
   CURRENCY: 'USD',
-  SHOW_DEBUG_PANEL: true   // панель с событиями dataLayer внизу справа
+  SHOW_DEBUG_PANEL: true,  // панель с событиями dataLayer внизу справа
+
+  // Cookie-баннер и Consent Mode:
+  //  'gtm'  — сайт только показывает баннер, сохраняет выбор в cookie и пишет его в dataLayer.
+  //           Consent Mode (default/update) настраиваешь сама в GTM. ← режим для тренировки
+  //  'code' — сайт сам отправляет gtag('consent', 'default'/'update') — «готовое решение от разработчика»
+  //  'off'  — баннер не показывается
+  CONSENT_MODE: 'gtm'
 };
 
 /* =========================================================
@@ -22,10 +29,34 @@ var SITE_CONFIG = {
   var user = null;
   try { user = JSON.parse(localStorage.getItem('gc_user')); } catch (e) {}
 
+  // Сохранённый выбор посетителя (cookie gc_consent_analytics / gc_consent_marketing)
+  function readCookie(name) {
+    var m = document.cookie.match('(?:^|; )' + name + '=([^;]*)');
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+  var consentAnalytics = readCookie('gc_consent_analytics') || 'unknown';   // granted / denied / unknown
+  var consentMarketing = readCookie('gc_consent_marketing') || 'unknown';
+
+  // Режим 'code': сайт сам задаёт Consent Mode до загрузки GTM
+  if (SITE_CONFIG.CONSENT_MODE === 'code') {
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    gtag('consent', 'default', {
+      analytics_storage: consentAnalytics === 'granted' ? 'granted' : 'denied',
+      ad_storage: consentMarketing === 'granted' ? 'granted' : 'denied',
+      ad_user_data: consentMarketing === 'granted' ? 'granted' : 'denied',
+      ad_personalization: consentMarketing === 'granted' ? 'granted' : 'denied',
+      functionality_storage: 'granted',
+      security_storage: 'granted',
+      wait_for_update: 500
+    });
+  }
+
   window.dataLayer.push({
     page_type: pageType,
     user_status: user ? 'logged_in' : 'guest',
-    user_id: user ? user.id : undefined
+    user_id: user ? user.id : undefined,
+    consent_analytics: consentAnalytics,
+    consent_marketing: consentMarketing
   });
 
   var id = SITE_CONFIG.GTM_ID;

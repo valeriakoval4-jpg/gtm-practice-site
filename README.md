@@ -63,3 +63,34 @@ python3 -m http.server 8000
 5. Отследи `generate_lead` и отметь его ключевым событием (конверсией) в GA4.
 6. Сделай задания из списка «не отслежено» выше.
 7. Бонус: включи Enhanced Measurement в GA4 и посмотри, что из этого он ловит сам (прокрутка, исходящие клики, файлы, видео) — и чем это отличается от твоих тегов.
+
+## 🍪 Cookie-баннер и Consent Mode
+
+При первом визите внизу слева появляется баннер: «Принять все», «Отклонить все», «Настроить»
+(категории **Аналитика** и **Маркетинг**). Открыть его снова — ссылка «🍪 Настройки cookie» в футере.
+Чтобы снова увидеть баннер «как новый посетитель» — открой сайт в режиме инкогнито или удали cookie сайта.
+
+**Где хранится выбор** — cookie (на 180 дней):
+
+| Cookie | Значения | Consent Mode |
+|---|---|---|
+| `gc_consent_analytics` | `granted` / `denied` | `analytics_storage` |
+| `gc_consent_marketing` | `granted` / `denied` | `ad_storage`, `ad_user_data`, `ad_personalization` |
+
+**Что попадает в dataLayer:**
+- на каждой странице до загрузки GTM: `consent_analytics`, `consent_marketing` (`granted` / `denied` / `unknown`, если выбора ещё не было);
+- `cookie_banner_view` (`banner_source`: `first_visit` / `footer_link`);
+- `cookie_consent_update` (`consent_action`: `accept_all` / `reject_all` / `custom`, плюс `consent_analytics`, `consent_marketing`).
+
+**Режим** задаётся в `js/gtm.js` → `CONSENT_MODE`:
+- `'gtm'` (по умолчанию) — сайт ничего не сообщает Google о согласии. Consent Mode настраиваешь сама в GTM — это и есть тренировка;
+- `'code'` — сайт сам отправляет `gtag('consent', 'default', …)` (всё `denied`, пока нет выбора) и `gtag('consent', 'update', …)` после выбора;
+- `'off'` — баннера нет.
+
+### Задания по Consent Mode (режим `'gtm'`)
+1. Включи в GTM **Админ → Настройки контейнера → «Включить обзор согласия»** (Consent Overview).
+2. Создай переменные «Сторонний файл cookie» (1st Party Cookie) для `gc_consent_analytics` и `gc_consent_marketing`.
+3. Добавь тег из галереи шаблонов (например, **Consent Mode (Google tags)** от Simo Ahava) на триггер **Consent Initialization – All Pages**: состояние `default` — `denied`, если cookie нет, иначе значение из cookie.
+4. Второй такой же тег в режиме `update` на специальное событие `cookie_consent_update`.
+5. В предпросмотре открой вкладку **Consent** в Tag Assistant: проверь On-page Default и On-page Update.
+6. Нажми «Отклонить все» и посмотри, что GA4 отправляет cookieless-пинги (параметр `gcs=G100` в запросах `collect`); после «Принять все» — `gcs=G111`.

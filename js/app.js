@@ -111,7 +111,7 @@ function renderLayout() {
         '<div><h4>🌱 Green Corner</h4><p>Учебный магазин растений для практики GTM и GA4. Ничего не продаём по-настоящему 🙂</p></div>' +
         '<div><h4>Магазин</h4><a href="catalog.html">Каталог</a><a href="cart.html">Корзина</a><a href="files/plant-care-guide.pdf" download>📄 Гайд по уходу (PDF)</a></div>' +
         '<div><h4>Мы в соцсетях</h4><a href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram</a><a href="https://www.pinterest.com/" target="_blank" rel="noopener">Pinterest</a><a href="https://www.youtube.com/" target="_blank" rel="noopener">YouTube</a></div>' +
-        '<div><h4>Связаться</h4><a href="tel:+10000000000">📞 +1 000 000-00-00</a><a href="mailto:hello@example.com">✉️ hello@example.com</a></div>' +
+        '<div><h4>Связаться</h4><a href="tel:+10000000000">📞 +1 000 000-00-00</a><a href="mailto:hello@example.com">✉️ hello@example.com</a><a href="#" id="cookie-settings-link">🍪 Настройки cookie</a></div>' +
       '</div>';
   }
   updateCartCount();
@@ -406,10 +406,90 @@ function initDebugPanel() {
   tick(); setInterval(tick, 400);
 }
 
+/* ---------- cookie banner ---------- */
+// Выбор хранится в cookie gc_consent_analytics и gc_consent_marketing (granted/denied), 180 дней.
+// При выборе в dataLayer уходит событие cookie_consent_update.
+function setCookie(name, value, days) {
+  document.cookie = name + '=' + value + '; max-age=' + days * 86400 + '; path=/; SameSite=Lax';
+}
+function readConsentCookie(name) {
+  var m = document.cookie.match('(?:^|; )' + name + '=([^;]*)');
+  return m ? m[1] : null;
+}
+function initConsentBanner() {
+  var mode = (window.SITE_CONFIG && SITE_CONFIG.CONSENT_MODE) || 'gtm';
+  var link = $('#cookie-settings-link');
+  if (mode === 'off') { if (link) link.style.display = 'none'; return; }
+
+  var banner = document.createElement('div');
+  banner.className = 'consent-banner';
+  banner.id = 'cookie-banner';
+  banner.setAttribute('role', 'dialog');
+  banner.setAttribute('aria-label', 'Настройки cookie');
+  banner.innerHTML =
+    '<h3>🍪 Мы используем cookie</h3>' +
+    '<p>Нужны, чтобы сайт работал, а ещё — чтобы считать посещения и показывать рекламу. Выбери, что разрешить.</p>' +
+    '<div class="consent-options" hidden>' +
+      '<label class="consent-option"><input type="checkbox" checked disabled><span><b>Необходимые</b><small>Корзина и вход. Всегда включены.</small></span></label>' +
+      '<label class="consent-option"><input type="checkbox" id="consent-analytics"><span><b>Аналитика</b><small>Google Analytics · analytics_storage</small></span></label>' +
+      '<label class="consent-option"><input type="checkbox" id="consent-marketing"><span><b>Маркетинг</b><small>Реклама · ad_storage, ad_user_data, ad_personalization</small></span></label>' +
+    '</div>' +
+    '<div class="consent-buttons">' +
+      '<button class="btn btn-small" id="consent-accept-all">Принять все</button>' +
+      '<button class="btn btn-small btn-outline" id="consent-reject-all">Отклонить все</button>' +
+      '<button class="btn btn-small btn-ghost" id="consent-customize">Настроить</button>' +
+      '<button class="btn btn-small" id="consent-save" hidden>Сохранить выбор</button>' +
+    '</div>';
+  document.body.appendChild(banner);
+
+  var options = $('.consent-options', banner);
+  function open(source) {
+    $('#consent-analytics').checked = readConsentCookie('gc_consent_analytics') === 'granted';
+    $('#consent-marketing').checked = readConsentCookie('gc_consent_marketing') === 'granted';
+    banner.classList.add('show');
+    document.body.classList.add('consent-open');
+    window.dataLayer.push({ event: 'cookie_banner_view', banner_source: source });
+  }
+  function close() {
+    banner.classList.remove('show');
+    document.body.classList.remove('consent-open');
+    options.hidden = true; $('#consent-save').hidden = true; $('#consent-customize').hidden = false;
+  }
+  function save(analytics, marketing, action) {
+    var a = analytics ? 'granted' : 'denied', m = marketing ? 'granted' : 'denied';
+    setCookie('gc_consent_analytics', a, 180);
+    setCookie('gc_consent_marketing', m, 180);
+    if (mode === 'code' && window.gtag) {
+      gtag('consent', 'update', { analytics_storage: a, ad_storage: m, ad_user_data: m, ad_personalization: m });
+    }
+    window.dataLayer.push({
+      event: 'cookie_consent_update',
+      consent_action: action,          // accept_all / reject_all / custom
+      consent_analytics: a,
+      consent_marketing: m
+    });
+    close();
+    toast('Настройки cookie сохранены');
+  }
+
+  $('#consent-accept-all').onclick = function () { save(true, true, 'accept_all'); };
+  $('#consent-reject-all').onclick = function () { save(false, false, 'reject_all'); };
+  $('#consent-customize').onclick = function () {
+    options.hidden = false; this.hidden = true; $('#consent-save').hidden = false;
+  };
+  $('#consent-save').onclick = function () {
+    save($('#consent-analytics').checked, $('#consent-marketing').checked, 'custom');
+  };
+  if (link) link.addEventListener('click', function (e) { e.preventDefault(); open('footer_link'); });
+
+  if (!readConsentCookie('gc_consent_analytics')) open('first_visit');
+}
+
 /* ---------- start ---------- */
 document.addEventListener('DOMContentLoaded', function () {
   renderLayout();
   var page = document.body.dataset.page;
   if (pages[page]) pages[page]();
+  initConsentBanner();
   initDebugPanel();
 });
