@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Green Corner — магазин растений</title>
+  <!-- Google Tag Manager (ID задаётся в js/gtm.js) -->
+  <script src="js/gtm.js" data-page="home"></script>
+  <!-- End Google Tag Manager -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/app.js" defer></script>
+</head>
+<body data-page="home">
+<header id="site-header"></header>
+<main>
+<section class="hero"><div class="container">
+  <div>
+    <h1>Растения, которые делают дом уютнее</h1>
+    <p>Небольшой учебный магазин, чтобы практиковаться в настройке Google Tag Manager и Google Analytics 4.</p>
+    <div class="hero-buttons">
+      <a class="btn" href="catalog.html" id="hero-cta">Смотреть каталог →</a>
+      <a class="btn btn-outline" href="about.html">О нас</a>
+    </div>
+  </div>
+  <div class="hero-art">🪴</div>
+</div></section>
+
+<section><div class="container">
+  <div class="promo" id="promo-banner">
+    <div><h3>−10% на первый заказ</h3><p>Используй промокод <b>WELCOME10</b> при оформлении.</p></div>
+    <a class="btn" id="promo-link" href="catalog.html">Выбрать растение</a>
+  </div>
+</div></section>
+
+<section><div class="container">
+  <h2 class="section-title">Хиты продаж</h2>
+  <p class="section-sub">То, что чаще всего забирают домой</p>
+  <div class="grid" id="featured"></div>
+</div></section>
+
+<section><div class="container">
+  <div class="features">
+    <div class="feature"><div>🚚</div><h4>Доставка за 1–2 дня</h4><p>Бережно упакуем и привезём.</p></div>
+    <div class="feature"><div>💧</div><h4>Гайд по уходу</h4><p><a href="files/plant-care-guide.pdf" download id="guide-download">Скачать PDF</a> бесплатно.</p></div>
+    <div class="feature"><div>🌍</div><h4>Эко-упаковка</h4><p>Без пластика, только картон.</p></div>
+    <div class="feature"><div>💚</div><h4>Гарантия 14 дней</h4><p>Растение приживётся — или вернём деньги.</p></div>
+  </div>
+</div></section>
+
+<section id="newsletter"><div class="container">
+  <div class="form-card">
+    <h2 class="section-title">Подпишись на рассылку</h2>
+    <p class="section-sub">Советы по уходу и скидки раз в месяц. Без спама.</p>
+    <form id="newsletter-form" class="newsletter" novalidate>
+      <input type="email" id="newsletter-email" name="email" placeholder="you@example.com">
+      <button class="btn" type="submit">Подписаться</button>
+    </form>
+  </div>
+</div></section>
+</main>
+<footer id="site-footer"></footer>
+</body>
+</html>

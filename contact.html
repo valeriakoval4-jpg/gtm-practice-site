@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Контакты — Green Corner</title>
+  <!-- Google Tag Manager (ID задаётся в js/gtm.js) -->
+  <script src="js/gtm.js" data-page="contact"></script>
+  <!-- End Google Tag Manager -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/app.js" defer></script>
+</head>
+<body data-page="contact">
+<header id="site-header"></header>
+<main>
+<section><div class="container">
+  <h1 class="section-title">Контакты</h1>
+  <p class="section-sub">Напиши нам — ответим в течение дня</p>
+  <div class="two-col">
+    <form id="contact-form" class="form-card" novalidate>
+      <div class="form-grid">
+        <div class="field"><label for="c-name">Имя</label><input type="text" id="c-name" name="name" required><div class="error">Укажите имя</div></div>
+        <div class="field"><label for="c-email">Email</label><input type="email" id="c-email" name="email" required><div class="error">Неверный email</div></div>
+        <div class="field full"><label for="topic">Тема</label>
+          <select id="topic" name="topic"><option value="question">Вопрос о растении</option><option value="order">Заказ и доставка</option><option value="partnership">Сотрудничество</option></select></div>
+        <div class="field full"><label for="message">Сообщение</label><textarea id="message" name="message" rows="5" required></textarea><div class="error">Напишите сообщение</div></div>
+      </div>
+      <p><button class="btn" type="submit">Отправить</button></p>
+    </form>
+    <aside class="order-box">
+      <h3 style="margin-top:0">Как с нами связаться</h3>
+      <div class="contact-links">
+        <a href="tel:+10000000000">📞 +1 000 000-00-00</a>
+        <a href="mailto:hello@example.com">✉️ hello@example.com</a>
+        <a href="https://wa.me/10000000000" target="_blank" rel="noopener">💬 WhatsApp</a>
+        <a href="https://t.me/example" target="_blank" rel="noopener">✈️ Telegram</a>
+      </div>
+    </aside>
+  </div>
+</div></section>
+</main>
+<footer id="site-footer"></footer>
+</body>
+</html>

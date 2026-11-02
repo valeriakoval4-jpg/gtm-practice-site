@@ -1,0 +1,8 @@
+{
+  "name": "gtm-practice-site",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx --yes serve@14.2.4 -l 8000 ."
+  }
+}

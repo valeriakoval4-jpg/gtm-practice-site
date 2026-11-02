@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Оформление заказа — Green Corner</title>
+  <!-- Google Tag Manager (ID задаётся в js/gtm.js) -->
+  <script src="js/gtm.js" data-page="checkout"></script>
+  <!-- End Google Tag Manager -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/app.js" defer></script>
+</head>
+<body data-page="checkout">
+<header id="site-header"></header>
+<main>
+<section><div class="container">
+  <h1 class="section-title">Оформление заказа</h1>
+  <p class="section-sub">Это учебная форма — данные никуда не отправляются</p>
+  <div class="two-col">
+    <form id="checkout-form" class="form-card" novalidate>
+      <fieldset><legend>Контакты</legend>
+        <div class="form-grid">
+          <div class="field"><label for="name">Имя</label><input type="text" id="name" name="name" required><div class="error">Укажите имя</div></div>
+          <div class="field"><label for="email">Email</label><input type="email" id="email" name="email" required><div class="error">Неверный email</div></div>
+          <div class="field full"><label for="address">Адрес</label><input type="text" id="address" name="address" required><div class="error">Укажите адрес</div></div>
+        </div>
+      </fieldset>
+      <fieldset><legend>Доставка</legend>
+        <div class="radio-group">
+          <label><input type="radio" name="shipping" value="courier"><span>🚚 Курьер — $5</span></label>
+          <label><input type="radio" name="shipping" value="pickup"><span>🏬 Самовывоз — бесплатно</span></label>
+        </div>
+      </fieldset>
+      <fieldset><legend>Оплата</legend>
+        <div class="radio-group">
+          <label><input type="radio" name="payment" value="card"><span>💳 Картой онлайн</span></label>
+          <label><input type="radio" name="payment" value="cash"><span>💵 При получении</span></label>
+        </div>
+      </fieldset>
+      <fieldset><legend>Промокод</legend>
+        <div class="newsletter"><input type="text" id="coupon" placeholder="WELCOME10"><button type="button" class="btn btn-outline" id="apply-coupon">Применить</button></div>
+      </fieldset>
+      <button class="btn" type="submit" id="place-order">Подтвердить заказ</button>
+    </form>
+    <aside class="order-box"><h3 style="margin-top:0">Ваш заказ</h3><div id="order-summary"></div></aside>
+  </div>
+</div></section>
+</main>
+<footer id="site-footer"></footer>
+</body>
+</html>
