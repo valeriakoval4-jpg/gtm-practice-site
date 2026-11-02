@@ -3,6 +3,9 @@
    ========================================================= */
 var SITE_CONFIG = {
   GTM_ID: 'GTM-XXXXXXX',   // ← вставь сюда ID своего контейнера GTM
+  // GA4 напрямую (gtag.js). Работает ТОЛЬКО пока GTM_ID не задан —
+  // как только впишешь GTM-ID, этот код отключится и GA4 нужно будет настроить тегом в GTM
+  GA4_ID: 'G-EK6764V55Q',
   CURRENCY: 'USD',
   SHOW_DEBUG_PANEL: true   // панель с событиями dataLayer внизу справа
 };
@@ -28,6 +31,16 @@ var SITE_CONFIG = {
   var id = SITE_CONFIG.GTM_ID;
   if (!id || id.indexOf('XXXX') !== -1) {
     console.warn('[GTM] ID контейнера не задан — открой js/gtm.js и впиши свой GTM-ID');
+    // Временный режим: GA4 через gtag.js (официальный код Google tag)
+    if (SITE_CONFIG.GA4_ID) {
+      var g = document.createElement('script');
+      g.async = true;
+      g.src = 'https://www.googletagmanager.com/gtag/js?id=' + SITE_CONFIG.GA4_ID;
+      document.head.appendChild(g);
+      window.gtag = function () { window.dataLayer.push(arguments); };
+      gtag('js', new Date());
+      gtag('config', SITE_CONFIG.GA4_ID);
+    }
     return;
   }
 
