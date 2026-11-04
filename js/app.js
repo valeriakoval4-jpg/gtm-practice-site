@@ -74,7 +74,7 @@ function addToCart(p, qty, listName) {
 function renderLayout() {
   var page = document.body.dataset.page;
   var user = null; try { user = JSON.parse(localStorage.getItem('gc_user')); } catch (e) {}
-  var nav = [['index.html', 'Главная', 'home'], ['catalog.html', 'Каталог', 'catalog'], ['about.html', 'О нас', 'about'], ['contact.html', 'Контакты', 'contact']];
+  var nav = [['index.html', 'Главная', 'home'], ['catalog.html', 'Каталог', 'catalog'], ['about.html', 'О нас', 'about'], ['lead.html', 'Для бизнеса', 'lead'], ['contact.html', 'Контакты', 'contact']];
   var header = $('#site-header');
   if (header) {
     header.className = 'site-header';
@@ -109,7 +109,7 @@ function renderLayout() {
     footer.innerHTML =
       '<div class="container">' +
         '<div><h4>🌱 Green Corner</h4><p>Учебный магазин растений для практики GTM и GA4. Ничего не продаём по-настоящему 🙂</p></div>' +
-        '<div><h4>Магазин</h4><a href="catalog.html">Каталог</a><a href="cart.html">Корзина</a><a href="files/plant-care-guide.pdf" download>📄 Гайд по уходу (PDF)</a></div>' +
+        '<div><h4>Магазин</h4><a href="catalog.html">Каталог</a><a href="cart.html">Корзина</a><a href="files/plant-care-guide.pdf" download>📄 Гайд по уходу (PDF)</a><a href="lab/">🧪 Лаборатория GA4 ⇄ Salesforce</a></div>' +
         '<div><h4>Мы в соцсетях</h4><a href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram</a><a href="https://www.pinterest.com/" target="_blank" rel="noopener">Pinterest</a><a href="https://www.youtube.com/" target="_blank" rel="noopener">YouTube</a></div>' +
         '<div><h4>Связаться</h4><a href="tel:+10000000000">📞 +1 000 000-00-00</a><a href="mailto:hello@example.com">✉️ hello@example.com</a><a href="#" id="cookie-settings-link">🍪 Настройки cookie</a></div>' +
       '</div>';
@@ -361,6 +361,84 @@ pages.about = function () {
   initNewsletter('about-newsletter-form', 'about-newsletter-success');
 };
 
+/* ---------- B2B lead form (→ Salesforce Web-to-Lead, симуляция) ---------- */
+// Метки кампании запоминаем при входе на сайт (на время сессии), чтобы они дожили до формы
+function captureAttribution() {
+  var q = new URLSearchParams(location.search);
+  if (q.get('utm_source') || q.get('gclid')) {
+    sessionStorage.setItem('gc_attribution', JSON.stringify({
+      utm_source: q.get('utm_source') || '', utm_medium: q.get('utm_medium') || '',
+      utm_campaign: q.get('utm_campaign') || '', gclid: q.get('gclid') || ''
+    }));
+  }
+}
+function getAttribution() {
+  try { return JSON.parse(sessionStorage.getItem('gc_attribution')) || {}; } catch (e) { return {}; }
+}
+// client_id из cookie _ga: "GA1.1.1234567890.1730000000" → "1234567890.1730000000"
+function getGaClientId() {
+  var m = document.cookie.match(/(?:^|; )_ga=([^;]*)/);
+  if (!m) return '';
+  var parts = m[1].split('.');
+  return parts.length >= 4 ? parts[2] + '.' + parts[3] : '';
+}
+// session_id из cookie _ga_<ID потока>: "GS1.1.1730712345.3..." или "GS2.1.s1730712345$o3$..."
+function getGaSessionId() {
+  var id = ((window.SITE_CONFIG && SITE_CONFIG.GA4_ID) || '').replace(/^G-/, '');
+  var re = id ? new RegExp('(?:^|; )_ga_' + id + '=([^;]*)') : /(?:^|; )_ga_[A-Z0-9]+=([^;]*)/;
+  var m = document.cookie.match(re);
+  if (!m) return '';
+  var v = decodeURIComponent(m[1]);
+  var gs2 = v.match(/^GS2\.\d+\.s(\d+)/);
+  if (gs2) return gs2[1];
+  var parts = v.split('.');
+  return parts.length >= 3 ? parts[2] : '';
+}
+
+pages.lead = function () {
+  var form = $('#b2b-lead-form');
+  function fillHidden() {
+    var a = getAttribution();
+    $('#ga_client_id').value = getGaClientId();
+    $('#ga_session_id').value = getGaSessionId();
+    $('#gclid').value = a.gclid || '';
+    $('#utm_source').value = a.utm_source || '';
+    $('#utm_medium').value = a.utm_medium || '';
+    $('#utm_campaign').value = a.utm_campaign || '';
+    $('#hidden-preview').innerHTML = $all('input[type=hidden]', form).map(function (i) {
+      return '<div><code>' + i.name + '</code> = <b>' + (i.value || '<span style="color:#b3403a">(пусто)</span>') + '</b></div>';
+    }).join('');
+  }
+  fillHidden();
+  $('#show-hidden').addEventListener('change', function () { fillHidden(); $('#hidden-preview').hidden = !this.checked; });
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (!validate(form)) { window.dataLayer.push({ event: 'form_error', form_name: 'b2b_wholesale' }); return; }
+    fillHidden();   // cookie GA могли появиться позже загрузки страницы — читаем в момент отправки
+    var data = {};
+    $all('input, select, textarea', form).forEach(function (i) { if (i.name) data[i.name] = i.value.trim(); });
+    data.web_id = 'W-' + Date.now().toString(36).toUpperCase();
+    data.submitted_at = new Date().toISOString();
+    data.page = location.pathname;
+
+    // «Отправка» в Salesforce Web-to-Lead (симуляция: складываем в localStorage, лаборатория их заберёт)
+    var outbox = []; try { outbox = JSON.parse(localStorage.getItem('gc_sf_outbox')) || []; } catch (err) {}
+    outbox.push(data);
+    localStorage.setItem('gc_sf_outbox', JSON.stringify(outbox));
+
+    window.dataLayer.push({
+      event: 'generate_lead', form_name: 'b2b_wholesale', lead_source: 'website',
+      value: +data.budget, currency: CURRENCY
+    });
+    form.outerHTML = '<div class="form-card" id="b2b-lead-success"><p class="success">✅ Заявка отправлена! Менеджер свяжется с вами.</p>' +
+      '<p>🧪 Учебная заявка <b>' + data.web_id + '</b> ушла в «Salesforce». ' +
+      (data.ga_client_id ? 'GA client_id: <code>' + data.ga_client_id + '</code>' :
+        '<b style="color:#b3403a">client_id пустой</b> — cookie _ga не найдена (GA4 не загрузился, блокировщик рекламы или отказ от cookie).') +
+      '</p><p><a class="btn" href="lab/">Открыть Лабораторию →</a></p></div>';
+  });
+};
+
 /* ---------- validation ---------- */
 function validate(form) {
   var ok = true;
@@ -487,6 +565,7 @@ function initConsentBanner() {
 
 /* ---------- start ---------- */
 document.addEventListener('DOMContentLoaded', function () {
+  captureAttribution();
   renderLayout();
   var page = document.body.dataset.page;
   if (pages[page]) pages[page]();

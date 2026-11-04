@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Для бизнеса — Green Corner</title>
+  <!-- Google Tag Manager (ID задаётся в js/gtm.js) -->
+  <script src="js/gtm.js" data-page="lead"></script>
+  <!-- End Google Tag Manager -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/app.js" defer></script>
+</head>
+<body data-page="lead">
+<header id="site-header"></header>
+<main>
+<section><div class="container">
+  <h1 class="section-title">Озеленение офисов и оптовые заказы</h1>
+  <p class="section-sub">Оставьте заявку — менеджер свяжется с вами в течение рабочего дня</p>
+  <div class="two-col">
+    <form id="b2b-lead-form" class="form-card" novalidate>
+      <div class="form-grid">
+        <div class="field"><label for="first_name">Имя</label><input type="text" id="first_name" name="first_name" required><div class="error">Укажите имя</div></div>
+        <div class="field"><label for="last_name">Фамилия</label><input type="text" id="last_name" name="last_name" required><div class="error">Укажите фамилию</div></div>
+        <div class="field"><label for="email">Рабочий email</label><input type="email" id="email" name="email" required><div class="error">Неверный email</div></div>
+        <div class="field"><label for="phone">Телефон</label><input type="tel" id="phone" name="phone"></div>
+        <div class="field"><label for="company">Компания</label><input type="text" id="company" name="company" required><div class="error">Укажите компанию</div></div>
+        <div class="field"><label for="budget">Бюджет заказа, $</label>
+          <select id="budget" name="budget">
+            <option value="500">до $500</option><option value="2000" selected>$500 – $2 000</option>
+            <option value="5000">$2 000 – $5 000</option><option value="10000">больше $5 000</option>
+          </select></div>
+        <div class="field full"><label for="description">Что нужно озеленить?</label><textarea id="description" name="description" rows="3"></textarea></div>
+      </div>
+
+      <!-- Скрытые поля: заполняются скриптом при отправке.
+           Их значения уходят в Salesforce вместе с заявкой (Web-to-Lead) -->
+      <input type="hidden" name="ga_client_id" id="ga_client_id">
+      <input type="hidden" name="ga_session_id" id="ga_session_id">
+      <input type="hidden" name="gclid" id="gclid">
+      <input type="hidden" name="utm_source" id="utm_source">
+      <input type="hidden" name="utm_medium" id="utm_medium">
+      <input type="hidden" name="utm_campaign" id="utm_campaign">
+
+      <p><button class="btn" type="submit">Отправить заявку</button></p>
+      <label class="dev-toggle"><input type="checkbox" id="show-hidden"> 🛠 Показать скрытые поля (режим разработчика)</label>
+      <div id="hidden-preview" class="hidden-preview" hidden></div>
+    </form>
+    <aside class="order-box">
+      <h3 style="margin-top:0">🧪 Это часть учебной цепочки</h3>
+      <p>Заявка не уходит в настоящий Salesforce — она сохраняется в браузере и появляется в
+        <a href="lab/">Лаборатории GA4 ⇄ Salesforce</a>.</p>
+      <p>Для теста открой эту страницу с метками кампании:</p>
+      <p><a href="lead.html?utm_source=google&amp;utm_medium=cpc&amp;utm_campaign=b2b_autumn&amp;gclid=TeSt-GCLID-123" id="utm-test-link">lead.html?utm_source=google&amp;utm_medium=cpc&amp;…</a></p>
+    </aside>
+  </div>
+</div></section>
+</main>
+<footer id="site-footer"></footer>
+</body>
+</html>

@@ -218,3 +218,9 @@ summary { font-weight: 700; cursor: pointer; }
   .consent-banner { left: 8px; right: 8px; bottom: 8px; width: auto; }
   body.consent-open .dl-panel { bottom: auto; top: 110px; }
 }
+
+/* B2B lead form */
+.dev-toggle { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: .88rem; color: var(--muted); cursor: pointer; margin: 4px 0 0; }
+.hidden-preview { margin-top: 10px; background: #1f2620; color: #d7e6d3; border-radius: 12px; padding: 12px 14px; font: 12.5px/1.7 ui-monospace, Menlo, Consolas, monospace; overflow-x: auto; }
+.hidden-preview[hidden] { display: none; }
+.hidden-preview code { color: #9fe0a0; }
