@@ -1,380 +1,306 @@
 /* =========================================================
-   Лаборатория GA4 ⇄ Salesforce — «движок» симуляции
-   Состояние, псевдо-Salesforce (поля, Web-to-Lead, Flow),
-   псевдо-GA4 (секреты, ключевые события, приём Measurement Protocol)
+   Лаборатория GA4 ⇄ Salesforce v2 — движок
+   По документу «GA4 + Salesforce: пошаговая настройка» (шаги 0–12)
    ========================================================= */
-var LAB_KEY = 'gc_lab_state_v1';
-var GA_PROPERTY_MID = 'G-EK6764V55Q';      // ID потока данных твоего ресурса GA4
-var LEAD_STATUSES = ['New', 'Working', 'Qualified', 'Unqualified', 'Converted'];
-var STATUS_RU = { New: 'Новый', Working: 'В работе', Qualified: 'Квалифицирован', Unqualified: 'Не квалифицирован', Converted: 'Конвертирован' };
-var GA_LEAD_EVENTS = ['generate_lead', 'working_lead', 'qualify_lead', 'disqualify_lead', 'close_convert_lead', 'close_unconvert_lead'];
-var RESERVED_EVENTS = ['ad_activeview', 'ad_click', 'ad_exposure', 'ad_query', 'ad_reward', 'adunit_exposure', 'app_clear_data', 'app_exception', 'app_install', 'app_remove', 'app_store_refund', 'app_update', 'app_upgrade', 'dynamic_link_app_open', 'dynamic_link_app_update', 'dynamic_link_first_open', 'error', 'firebase_campaign', 'firebase_in_app_message_action', 'first_open', 'first_visit', 'notification_dismiss', 'notification_foreground', 'notification_open', 'notification_receive', 'notification_send', 'os_update', 'session_start', 'user_engagement'];
+var LAB_KEY = 'gc_lab_state_v2';
+var GA_MID = 'G-EK6764V55Q', GTM_ID = 'GTM-NQSBNR2L';
 
-/* Стандартные поля Лида, которые уже есть в «org» */
-var STANDARD_LEAD_FIELDS = [
-  { label: 'Имя', api: 'FirstName', type: 'Text', std: true },
-  { label: 'Фамилия', api: 'LastName', type: 'Text', std: true },
-  { label: 'Email', api: 'Email', type: 'Email', std: true },
-  { label: 'Телефон', api: 'Phone', type: 'Phone', std: true },
-  { label: 'Компания', api: 'Company', type: 'Text', std: true },
-  { label: 'Описание', api: 'Description', type: 'Long Text Area', std: true },
-  { label: 'Статус лида', api: 'Status', type: 'Picklist', std: true },
-  { label: 'Источник лида', api: 'LeadSource', type: 'Picklist', std: true },
-  { label: 'ID записи', api: 'Id', type: 'ID', std: true },
-  { label: 'Бюджет', api: 'Budget__c', type: 'Currency', std: false, preset: true, sfid: '00N5g00000Bdg01' }
+/* Поля из шага 5 документа: имя (без __c) → откуда берём значение в контексте заявки */
+var REQ_FIELDS = [
+  ['GACLIENTID', 'ga_client_id'], ['GAUSERID', ''], ['GAMEASUREMENTID', 'ga_measurement_id'],
+  ['LEAD_SUBMISSION_ID', '#submission_id'], ['GA_SESSION_ID', 'ga_session_id'],
+  ['FIRST_LANDING_PATH', 'first_landing_path'], ['SESSION_LANDING_PATH', 'session_landing_path'],
+  ['FORM_PAGE_PATH', 'form_page_path'], ['CTA_ORIGIN_PATH', 'cta_origin_path'],
+  ['FORM_ID', 'form_id'], ['SITE_ID', 'site_id'],
+  ['FIRST_UTM_SOURCE', 'first_utm.source'], ['FIRST_UTM_MEDIUM', 'first_utm.medium'], ['FIRST_UTM_CAMPAIGN', 'first_utm.campaign'],
+  ['SUBMISSION_UTM_SOURCE', 'submission_utm.source'], ['SUBMISSION_UTM_MEDIUM', 'submission_utm.medium'], ['SUBMISSION_UTM_CAMPAIGN', 'submission_utm.campaign'],
+  ['SUBMITTED_AT', 'submitted_at']
+];
+var GA_IMPORT_FIELDS = ['GACLIENTID', 'GAUSERID', 'GAMEASUREMENTID'];
+var LEAD_STATUSES = ['New', 'Working', 'Qualified', 'Unqualified'];
+var RU = { New: 'Новый', Working: 'В работе', Qualified: 'Квалифицирован', Unqualified: 'Не подходит', Converted: 'Конвертирован',
+  Prospecting: 'Поиск', Proposal: 'Предложение', 'Closed Won': 'Выиграна', 'Closed Lost': 'Проиграна' };
+var REASONS = ['Нет бюджета', 'Не наш сегмент', 'Выбрали конкурента', 'Нет ответа', 'Спам'];
+/* Что произошло → событие (таблица шага 7) */
+var TRANSITIONS = [
+  { key: 'working', obj: 'Lead', value: 'Working', text: 'Менеджер связался с лидом', event: 'working_lead' },
+  { key: 'qualified', obj: 'Lead', value: 'Qualified', text: 'Лид квалифицирован', event: 'qualify_lead' },
+  { key: 'disqualified', obj: 'Lead', value: 'Unqualified', text: 'Лид не подходит', event: 'disqualify_lead' },
+  { key: 'won', obj: 'Opportunity', value: 'Closed Won', text: 'Сделка выиграна', event: 'close_convert_lead' },
+  { key: 'lost', obj: 'Opportunity', value: 'Closed Lost', text: 'Сделка проиграна', event: 'close_unconvert_lead' }
 ];
 
 function defaultState() {
   return {
-    version: 1,
-    current: 'brief',
+    version: 2, current: 's0', clock: 0,   // clock — учебное время, минуты
+    ans: {},                                // ответы на выборы и квизы {key: value}
     ga: {
-      secrets: [],              // {nickname, value, real}
-      ackTerms: false,
-      keyEvents: { page_view: false, scroll: false, generate_lead: false, working_lead: false, qualify_lead: false, disqualify_lead: false, close_convert_lead: false },
-      dims: [],                 // {name, scope, param}
-      realSend: false
+      retention: '2', unwanted: [], internalIp: '', internalFilter: 'testing',
+      dims: [], keyEvents: { generate_lead: false, form_submit: false, qualify_lead: false, close_convert_lead: false, disqualify_lead: false, working_lead: false },
+      secrets: [], ackTerms: false,
+      imp: { name: '', dataType: '', terms: false, user: '', schedule: '', ms: {}, won: { purchase: false, close_convert_lead: false }, created: false, lastRun: null, imported: {} },
+      bq: { project: '', region: '', daily: false, linked: false }
     },
     sf: {
-      fields: [],               // кастомные поля {label, api, type, length, sfid}
-      w2l: { generated: false, included: [], mapping: {} },
-      processedWebIds: [],
-      leads: [],
-      extCred: null,            // {name, protocol, principal}
-      permSet: { assigned: false, principalAccess: false },
-      nc: null,                 // {label, name, url, extCred, generateAuth}
-      settings: { Measurement_ID__c: '', API_Secret__c: '' },
-      flow: {
-        label: '', object: '', trigger: '', conditions: [], when: '', optimize: '', asyncPath: false, calloutPath: '',
-        decision: { New: '', Working: '', Qualified: '', Unqualified: '', Converted: '' },
-        action: {
-          nc: '', method: '', path: '',
-          query: { measurement_id: '', api_secret: '' },
-          body: { client_id: '', session_id: '', engagement_time_msec: '', lead_id: '', lead_source: '', value: '', currency: '', debug_mode: '' }
-        },
-      },
-      flowSaved: null,          // последняя сохранённая версия Flow {..., version}
-      flowActive: null          // активная версия — именно она исполняется (может быть старше последней!)
+      down: false, fields: { Lead: [], Opportunity: [] }, flsReadOnly: false, leadMap: {},
+      history: { LeadStatus: false, OppStage: false, OppAmount: false }, reasonField: false, reasonRule: false,
+      leads: [], opps: [], subs: [], changes: [], ncUrl: '',
+      flow: { active: false, async: false, when: '' }
     },
-    log: [],                    // запуски Flow
-    gaReceived: [],             // события, принятые «GA4»
-    quiz: {},
-    seeded: false
+    server: { dedup: '', realTime: false, skipNoClient: false, secret: '', validated: false, sentKeys: [] },
+    gaReceived: [],
+    events: []
   };
 }
-
 var S;
 function loadState() {
   try { S = JSON.parse(localStorage.getItem(LAB_KEY)); } catch (e) { S = null; }
-  if (!S || S.version !== 1) S = defaultState();
-  if (!S.seeded) {
-    S.sf.leads.push({
-      Id: '00Q5g000001TrAde', FirstName: 'Олег', LastName: 'Петров', Email: 'oleg@expo-partner.example', Phone: '+1 000 111-22-33',
-      Company: 'ТД «Выставка»', Description: 'Познакомились на выставке, ввёл менеджер вручную', Status: 'New',
-      LeadSource: 'Trade Show', Budget__c: 3000, custom: {}, origin: 'manual'
-    });
-    S.seeded = true;
-  }
+  if (!S || S.version !== 2) S = defaultState();
 }
 function saveState() { try { localStorage.setItem(LAB_KEY, JSON.stringify(S)); } catch (e) {} }
-function resetState() { localStorage.removeItem(LAB_KEY); S = null; loadState(); saveState(); }
+function resetState() { localStorage.removeItem(LAB_KEY); loadState(); saveState(); }
 
 /* ---------- утилиты ---------- */
 function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-function rnd(n, abc) { abc = abc || 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; var s = ''; for (var i = 0; i < n; i++) s += abc[Math.floor(Math.random() * abc.length)]; return s; }
-function sfId(prefix) { return prefix + rnd(15 - prefix.length, '0123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'); }
-function nowIso() { return new Date().toISOString(); }
-function time(iso) { var d = new Date(iso); return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
-function getOutbox() { try { return JSON.parse(localStorage.getItem('gc_sf_outbox')) || []; } catch (e) { return []; } }
-function allLeadFields() { return STANDARD_LEAD_FIELDS.concat(S.sf.fields); }
-function findField(api) { return allLeadFields().filter(function (f) { return f.api === api; })[0]; }
-function apiFromLabel(label) {
-  var base = label.trim().replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').replace(/_+/g, '_');
-  return base ? base + '__c' : '';
-}
-// Найти кастомное поле по смыслу (для проверок): client / session / gclid / utm_source ...
-function fieldBy(re) { return S.sf.fields.filter(function (f) { return re.test(f.api) || re.test(f.label); })[0]; }
-var FIELD_RE = {
-  ga_client_id: /client/i, ga_session_id: /session/i, gclid: /gclid/i,
-  utm_source: /utm.?source/i, utm_medium: /utm.?medium/i, utm_campaign: /utm.?campaign/i
-};
-function leadValue(lead, api) {
-  if (!lead) return '';
-  if (api in lead && api !== 'custom') return lead[api];
-  return lead.custom ? lead.custom[api] : '';
-}
-function leadClientId(lead) { var f = fieldBy(FIELD_RE.ga_client_id); return f ? leadValue(lead, f.api) : ''; }
-function leadSessionId(lead) { var f = fieldBy(FIELD_RE.ga_session_id); return f ? leadValue(lead, f.api) : ''; }
+function rnd(n, abc) { abc = abc || 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz0123456789'; var s = ''; for (var i = 0; i < n; i++) s += abc[Math.floor(Math.random() * abc.length)]; return s; }
+function sfId(prefix) { return prefix + rnd(15 - prefix.length); }
+function clockText(min) { var d = Math.floor(min / 1440), h = Math.floor(min % 1440 / 60), m = min % 60; return (d ? 'день ' + (d + 1) + ', ' : '') + String(h + 9).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
+function getPath(obj, path) { return path.split('.').reduce(function (o, k) { return o == null ? undefined : o[k]; }, obj); }
+function setPath(obj, path, v) { var ks = path.split('.'), last = ks.pop(); ks.reduce(function (o, k) { return o[k] = o[k] || {}; }, obj)[last] = v; }
+function separateDates() { return S.ans.dates === 'separate'; }
 
-/* ---------- Web-to-Lead: превращаем заявки сайта в Лиды ---------- */
-function processOutbox() {
-  var created = 0;
-  getOutbox().forEach(function (w) {
-    if (S.sf.processedWebIds.indexOf(w.web_id) !== -1) return;
-    var lead = {
-      Id: sfId('00Q5g0000'), FirstName: w.first_name, LastName: w.last_name, Email: w.email, Phone: w.phone,
-      Company: w.company, Description: w.description, Status: 'New', LeadSource: 'Web', Budget__c: +w.budget || 0,
-      custom: {}, origin: 'web', web_id: w.web_id, raw: w
-    };
-    Object.keys(S.sf.w2l.mapping).forEach(function (formField) {
-      var api = S.sf.w2l.mapping[formField];
-      if (api && w[formField] !== undefined) lead.custom[api] = w[formField];
-    });
-    S.sf.leads.unshift(lead);
-    S.sf.processedWebIds.push(w.web_id);
-    created++;
+/* ---------- «сервер» сайта (общий с сайтом localStorage) ---------- */
+function getDb() { try { return JSON.parse(localStorage.getItem('gc_server_db')) || { submissions: [], requests: [] }; } catch (e) { return { submissions: [], requests: [] }; } }
+function saveDb(db) { localStorage.setItem('gc_server_db', JSON.stringify(db)); }
+function tracked() { try { return JSON.parse(localStorage.getItem('gc_tracked_submissions')) || []; } catch (e) { return []; } }
+
+function fieldExists(obj, name) { return S.sf.fields[obj].some(function (f) { return f.name === name; }); }
+function fieldValue(sub, src) {
+  if (!src) return '';
+  if (src === '#submission_id') return sub.submission_id;
+  var v = getPath(sub.context, src);
+  return v == null ? '' : v;
+}
+
+/* Доставка заявок в Salesforce с повторами через 1, 5, 15 минут (шаг 4) */
+var RETRY = [1, 5, 15];
+function runQueue() {
+  var db = getDb(), report = [];
+  db.submissions.forEach(function (sub) {
+    var d = sub.delivery;
+    if (d.status === 'delivered' || d.status === 'failed') return;
+    if ((d.next_try_min || 0) > S.clock) return;
+    d.attempts++;
+    function fail(text, permanent) {
+      d.log.push({ min: S.clock, ok: false, text: text });
+      if (permanent || d.attempts > RETRY.length) {
+        d.status = 'failed';
+        d.log.push({ min: S.clock, ok: false, text: '📣 Уведомление ответственному: заявка ' + sub.submission_id + ' не доставлена (попыток: ' + d.attempts + ').' });
+      } else {
+        d.status = 'retry'; d.next_try_min = S.clock + RETRY[d.attempts - 1];
+        d.log.push({ min: S.clock, ok: false, text: 'Заявка ждёт в очереди. Следующая попытка через ' + RETRY[d.attempts - 1] + ' мин.' });
+      }
+      report.push(sub.submission_id + ': ' + text);
+    }
+    if (S.sf.down) return fail('503 Service Unavailable — Salesforce недоступен');
+    var missing = REQ_FIELDS.filter(function (f) { return !fieldExists('Lead', f[0]); }).map(function (f) { return f[0] + '__c'; });
+    if (missing.length) return fail('INVALID_FIELD: No such column \'' + missing[0] + '\' on sobject of type Lead' + (missing.length > 1 ? ' (и ещё ' + (missing.length - 1) + ')' : ''), true);
+    var vals = {};
+    REQ_FIELDS.forEach(function (f) { vals[f[0] + '__c'] = fieldValue(sub, f[1]); });
+    // Ищем существующий лид по email: повторная заявка не затирает данные первой
+    var lead = S.sf.leads.filter(function (l) { return l.Email && l.Email.toLowerCase() === (sub.contact.email || '').toLowerCase(); })[0];
+    var attached = !!lead;
+    if (!lead) {
+      lead = { Id: sfId('00Q'), FirstName: sub.contact.first_name, LastName: sub.contact.last_name, Email: sub.contact.email, Company: sub.contact.company,
+        Phone: sub.contact.phone, Budget: +sub.contact.budget || 0, Status: 'New', Reason: '', IsConverted: false, OppId: '', QualifiedDate: '', f: vals, created: S.clock };
+      S.sf.leads.unshift(lead);
+      logChange('Lead', lead, 'Created', '', 'New');
+    }
+    S.sf.subs.push({ Id: sfId('a0S'), submission_id: sub.submission_id, leadId: lead.Id, f: vals, created: S.clock });
+    d.status = 'delivered'; d.sf_lead_id = lead.Id; d.delivered_min = S.clock;
+    d.log.push({ min: S.clock, ok: true, text: attached ? '201: заявка сохранена отдельной записью и привязана к существующему лиду ' + lead.Id + ' (поля лида не перезаписаны)' : '201: создан лид ' + lead.Id });
+    report.push(sub.submission_id + ': доставлена');
   });
-  saveState();
-  return created;
+  saveDb(db); saveState();
+  return report;
+}
+function retryFailed(id) {
+  var db = getDb();
+  db.submissions.forEach(function (s) { if (s.submission_id === id) { s.delivery.status = 'retry'; s.delivery.attempts = 0; s.delivery.next_try_min = S.clock; } });
+  saveDb(db);
 }
 
-/* ---------- ресурсы Flow: {!$Record.X}, {!$CustomMetadata...} ---------- */
-function flowResources() {
-  var r = allLeadFields().map(function (f) { return '{!$Record.' + f.api + '}'; });
-  r.push('{!$CustomMetadata.GA4_Settings__mdt.Default.Measurement_ID__c}');
-  r.push('{!$CustomMetadata.GA4_Settings__mdt.Default.API_Secret__c}');
-  return r;
+/* ---------- Salesforce: изменения записей ---------- */
+function logChange(obj, rec, field, from, to) {
+  var ch = { id: sfId('0Ch'), min: S.clock, obj: obj, recId: rec.Id, field: field, from: from, to: to };
+  S.sf.changes.push(ch);
+  return ch;
 }
-function resolveValue(expr, lead) {
-  expr = (expr || '').trim();
-  var m = expr.match(/^\{!\s*(.+?)\s*\}$/);
-  if (!m) return { value: expr, literal: true };
-  var path = m[1];
-  if (path.indexOf('$Record.') === 0) {
-    var api = path.slice(8);
-    if (!findField(api)) return { error: 'Ресурс ' + expr + ' не найден: у Лида нет поля ' + api };
-    var v = leadValue(lead, api);
-    return { value: v == null ? '' : v };
-  }
-  if (path.indexOf('$CustomMetadata.GA4_Settings__mdt.Default.') === 0) {
-    var k = path.split('.').pop();
-    if (!(k in S.sf.settings)) return { error: 'Поле ' + k + ' не найдено в GA4_Settings__mdt' };
-    return { value: S.sf.settings[k] };
-  }
-  return { error: 'Неизвестный ресурс ' + expr };
+function findLead(id) { return S.sf.leads.filter(function (l) { return l.Id === id; })[0]; }
+function findOpp(id) { return S.sf.opps.filter(function (o) { return o.Id === id; })[0]; }
+
+function setLeadStatus(id, status, reason) {
+  var l = findLead(id); if (!l || l.IsConverted) return { error: 'Лид уже конвертирован.' };
+  if (status === 'Unqualified' && S.sf.reasonRule && !reason) return { error: 'Ошибка проверки (Validation Rule): укажите причину отказа.' };
+  var from = l.Status; l.Status = status; if (status === 'Unqualified') l.Reason = reason || '';
+  if (status === 'Qualified' && separateDates() && !l.QualifiedDate) l.QualifiedDate = clockText(S.clock);
+  var ch = logChange('Lead', l, 'Status', from, status);
+  afterSave('Lead', l, ch, from === status);
+  saveState(); return { ok: true };
+}
+function resaveLead(id) {
+  var l = findLead(id), old = l.Phone; l.Phone = '+1 000 ' + rnd(3, '0123456789') + '-' + rnd(2, '0123456789');
+  afterSave('Lead', l, logChange('Lead', l, 'Phone', old, l.Phone), true); saveState();
+}
+function convertLead(id) {
+  var l = findLead(id); if (!l || l.IsConverted) return;
+  var o = { Id: sfId('006'), Name: l.Company + ' — озеленение', Stage: 'Prospecting', Amount: l.Budget || 2000, Currency: 'USD', LeadId: l.Id, LostReason: '', CloseDate: '', f: {}, created: S.clock };
+  // Map Lead Fields: при конвертации значения переходят в поля сделки
+  Object.keys(S.sf.leadMap).forEach(function (lf) { var of = S.sf.leadMap[lf]; if (of && fieldExists('Opportunity', of.replace(/__c$/, ''))) o.f[of] = l.f[lf]; });
+  S.sf.opps.unshift(o); l.IsConverted = true; l.OppId = o.Id;
+  var from = l.Status; l.Status = 'Converted';
+  logChange('Lead', l, 'Status', from, 'Converted');
+  logChange('Opportunity', o, 'Created', '', 'Prospecting');
+  S.events.unshift({ min: S.clock, name: l.FirstName + ' ' + l.LastName, change: 'Лид конвертирован → сделка ' + o.Id, steps: [{ k: 'skip', t: 'Конвертация лида — отдельный этап, не выигрыш. Событие GA4 не нужно.' }] });
+  saveState(); return o;
+}
+function setOppStage(id, stage, reason) {
+  var o = findOpp(id);
+  if (stage === 'Closed Lost' && S.sf.reasonRule && !reason) return { error: 'Ошибка проверки (Validation Rule): укажите причину проигрыша.' };
+  var from = o.Stage; o.Stage = stage; if (stage === 'Closed Lost') o.LostReason = reason || '';
+  if (stage === 'Closed Won' && separateDates() && !o.CloseDate) o.CloseDate = clockText(S.clock);
+  var ch = logChange('Opportunity', o, 'Stage', from, stage);
+  afterSave('Opportunity', o, ch, from === stage);
+  saveState(); return { ok: true };
+}
+function editOppAmount(id) {
+  var o = findOpp(id), from = o.Amount; o.Amount = Math.round(o.Amount * 1.1);
+  afterSave('Opportunity', o, logChange('Opportunity', o, 'Amount', from, o.Amount), true); saveState();
 }
 
-/* ---------- условия входа Flow ---------- */
-function condResult(c, lead, prev) {
-  var cur = String(leadValue(lead, c.field) == null ? '' : leadValue(lead, c.field));
-  var old = prev ? String(leadValue(prev, c.field) == null ? '' : leadValue(prev, c.field)) : '';
-  var want = String(c.value || '').trim();
-  switch (c.op) {
-    case 'equals': return cur === want;
-    case 'not_equals': return cur !== want;
-    case 'is_null': return (want === 'True') === (cur === '');
-    case 'is_changed': return (want === 'True') === (!!prev && cur !== old);
-    default: return false;
+/* ---------- Вариант Б: Flow → свой сервер → Measurement Protocol ---------- */
+function transitionFor(obj, rec) {
+  var v = obj === 'Lead' ? rec.Status : rec.Stage;
+  return TRANSITIONS.filter(function (t) { return t.obj === obj && v === t.value; })[0];
+}
+function afterSave(obj, rec, ch, sameValue) {
+  var f = S.sf.flow, t = transitionFor(obj, rec), when = S.ans.flow_when === 1 ? 'only_when_met' : 'every';   // режим из шага 7
+  var entry = { min: S.clock, name: obj === 'Lead' ? rec.FirstName + ' ' + rec.LastName : rec.Name,
+    change: (ch.field === 'Status' || ch.field === 'Stage') && !sameValue ? (RU[ch.from] || ch.from) + ' → ' + (RU[ch.to] || ch.to) : 'Повторное сохранение записи (' + ch.field + ')', steps: [] };
+  function step(k, text) { entry.steps.push({ k: k, t: text }); }
+  if (!f.active) step('skip', 'Flow передачи статусов (вариант Б) не активен.');
+  else if (!t) step('skip', 'Для этого значения нет события в таблице сопоставления.');
+  else if (sameValue && when === 'only_when_met') step('skip', 'Запись уже была в «' + RU[t.value] + '» — Flow не запускается (Only when a record is updated to meet the condition requirements).');
+  else {
+    step(sameValue ? 'warn' : 'ok', sameValue ? 'Flow запущен повторно: запись сохранена и всё ещё «' + RU[t.value] + '» (режим «каждый раз, когда соответствует условиям»).' : 'Flow запущен: запись перешла в «' + RU[t.value] + '».');
+    if (!f.async) step('error', 'System.CalloutException: You have uncommitted work pending. Please commit or rollback before calling out. (Нужен путь Run Asynchronously.)');
+    else if ((S.sf.ncUrl || '').replace(/\/+$/, '') !== 'https://api.greencorner.example') step('error', 'Callout failed: Named Credential должен указывать на ваш сервер https://api.greencorner.example');
+    else { step('ok', 'Flow → POST api.greencorner.example/salesforce/status { record_id: ' + rec.Id + ', change_id: ' + ch.id + ', event: ' + t.event + ' }'); serverSend(rec, obj, ch, t, step); }
+  }
+  S.events.unshift(entry); if (S.events.length > 80) S.events.length = 80;
+}
+function dedupKey(rec, ch, t) {
+  switch (S.server.dedup) {
+    case 'record_change_event': return rec.Id + '|' + ch.id + '|' + t.event;
+    case 'record_event': return rec.Id + '|' + t.event;
+    case 'client': return (rec.f.GACLIENTID__c || '') + '|' + t.event;
+    default: return null;
   }
 }
-function conditionsMet(f, lead, prev) {
-  if (!f.conditions.length) return true;
-  return f.conditions.every(function (c) { return condResult(c, lead, prev); });
+var lastSend = null;
+function serverSend(rec, obj, ch, t, step, isRetry) {
+  if (!isRetry) lastSend = { recId: rec.Id, obj: obj, ch: ch, t: t };
+  var key = dedupKey(rec, ch, t);
+  if (key && S.server.sentKeys.indexOf(key) !== -1) { step('ok', 'Сервер: ключ «' + key + '» уже отправлялся — пропускаем (защита от дублей).'); return; }
+  var cid = rec.f.GACLIENTID__c || '';
+  if (!cid && S.server.skipNoClient) { step('skip', 'Сервер: у записи нет client_id — в GA4 не отправляем, результат остаётся в Salesforce.'); return; }
+  var params = { session_id: rec.f.GA_SESSION_ID__c || undefined, engagement_time_msec: 1, lead_submission_id: rec.f.LEAD_SUBMISSION_ID__c || undefined };
+  if (t.key === 'disqualified') params.reason = rec.Reason || '';
+  if (t.key === 'lost') { params.reason = rec.LostReason || ''; params.opportunity_id = rec.Id; }
+  if (t.key === 'won') { params.opportunity_id = rec.Id; params.value = rec.Amount; params.currency = rec.Currency; }
+  var body = { client_id: cid, events: [{ name: t.event, params: params }] };
+  if (S.server.realTime) body.timestamp_micros = '‹время изменения: ' + clockText(ch.min) + '›';
+  step('ok', 'Сервер → POST /mp/collect ' + JSON.stringify(body));
+  var secretOk = S.ga.secrets.some(function (s) { return s.value === S.server.secret; });
+  if (!cid) { step('warn', 'GA4 ответил 204, но событие отброшено: нет client_id. Ответ 2xx не значит, что данные приняты.'); return; }
+  if (!secretOk) { step('warn', 'GA4 ответил 204, но событие отброшено: api_secret на сервере не найден в потоке GA4.'); return; }
+  if (key) S.server.sentKeys.push(key);
+  recordGa(t.event, cid, params, 'mp', rec.Id, ch.min, S.server.realTime ? ch.min : S.clock);
+  step('ok', 'GA4 принял ' + t.event + (isRetry ? ' (повторная доставка!)' : '') + '.');
+}
+/* «Salesforce повторил вызов» — проверка защиты от дублей */
+function replayLastCallout() {
+  if (!lastSend) return false;
+  var rec = lastSend.obj === 'Lead' ? findLead(lastSend.recId) : findOpp(lastSend.recId);
+  var entry = { min: S.clock, name: '↺ Повтор вызова', change: 'Salesforce повторно отправил тот же вызов на сервер (таймаут сети)', steps: [] };
+  serverSend(rec, lastSend.obj, lastSend.ch, lastSend.t, function (k, t) { entry.steps.push({ k: k, t: t }); }, true);
+  S.events.unshift(entry); saveState(); return true;
+}
+function recordGa(name, cid, params, via, recId, happenedMin, eventMin) {
+  S.gaReceived.push({ name: name, client_id: cid, params: params, via: via, recId: recId, happened: happenedMin, eventTime: eventMin, received: S.clock });
 }
 
-/* ---------- проверки при сохранении Flow (как в Flow Builder) ---------- */
-function flowSaveErrors(f) {
-  f = f || S.sf.flow; var e = [];
-  if (!f.label.trim()) e.push('Укажите имя Flow.');
-  if (!f.object) e.push('Стартовый элемент: выберите объект.');
-  if (!f.trigger) e.push('Стартовый элемент: выберите, когда запускать Flow.');
-  if (!f.optimize) e.push('Стартовый элемент: выберите «Оптимизировать Flow для».');
-  if (f.optimize === 'fast') e.push('Действие HTTP-запроса нельзя добавить во Flow, оптимизированный для «Быстрых обновлений полей» (before-save). Выберите «Действия и связанные записи».');
-  if (f.trigger && f.trigger !== 'create' && !f.when) e.push('Для обновлённых записей выберите, когда запускать Flow.');
-  f.conditions.forEach(function (c, i) { if (!c.field || !c.op) e.push('Условие ' + (i + 1) + ': заполните поле и оператор.'); });
-  if (f.calloutPath === 'async' && !f.asyncPath) e.push('Путь «Run Asynchronously» не включён в стартовом элементе.');
-  if (!f.calloutPath) e.push('Выберите, на каком пути стоит HTTP-запрос.');
-  var a = f.action;
-  if (!a.nc) e.push('HTTP-запрос: выберите Named Credential.');
-  else if (!S.sf.nc || S.sf.nc.name !== a.nc) e.push('HTTP-запрос: Named Credential «' + a.nc + '» не существует.');
-  if (!a.method) e.push('HTTP-запрос: выберите метод.');
-  if (!a.path.trim()) e.push('HTTP-запрос: укажите путь URL.');
-  var any = LEAD_STATUSES.some(function (s) { return f.decision[s]; });
-  if (!any) e.push('Элемент «Решение»: ни для одного статуса не задано событие GA4.');
-  [a.query.measurement_id, a.query.api_secret].concat(Object.keys(a.body).map(function (k) { return a.body[k]; })).forEach(function (v) {
-    if (/^\{!/.test((v || '').trim())) { var r = resolveValue(v, {}); if (r.error) e.push(r.error); }
+/* ---------- Вариант А: встроенный импорт GA4 из Salesforce ---------- */
+function runImport() {
+  var imp = S.ga.imp, out = [];
+  if (!imp.created) return ['Источник данных ещё не создан.'];
+  function emit(key, ev, rec, ch, extra) {
+    var k = rec.Id + '|' + key + '|' + ev;
+    if (imp.imported[k]) return;
+    var cid = rec.f.GACLIENTID__c;
+    if (!cid) { out.push('⏭ Пропущено (пустое GACLIENTID): ' + rec.Id + ' / ' + key); imp.imported[k] = 'skipped'; return; }
+    imp.imported[k] = true;
+    recordGa(ev, cid, extra || {}, 'import', rec.Id, ch.min, ch.min);
+    out.push('✓ Импортировано: ' + ev + ' (' + rec.Id + ')');
+  }
+  S.sf.changes.forEach(function (ch) {
+    if (ch.obj === 'Lead') {
+      var l = findLead(ch.recId); if (!l) return;
+      if (ch.field === 'Created' && imp.ms.created) emit('created', 'generate_lead', l, ch);
+      if (ch.field === 'Status') TRANSITIONS.forEach(function (t) { if (t.obj === 'Lead' && t.value === ch.to && imp.ms[t.key]) emit(t.key, t.event, l, ch, t.key === 'disqualified' ? { reason: l.Reason } : {}); });
+    } else {
+      var o = findOpp(ch.recId); if (!o || ch.field !== 'Stage') return;
+      if (ch.to === 'Closed Won' && imp.ms.won) {
+        if (imp.won.purchase) emit('won', 'purchase', o, ch, { value: o.Amount, currency: o.Currency, transaction_id: o.Id });
+        if (imp.won.close_convert_lead) emit('won', 'close_convert_lead', o, ch, { value: o.Amount, currency: o.Currency });
+      }
+      if (ch.to === 'Closed Lost' && imp.ms.lost) emit('lost', 'close_unconvert_lead', o, ch, { reason: o.LostReason });
+    }
   });
-  return e;
+  imp.lastRun = S.clock; saveState();
+  return out.length ? out : ['Новых данных для импорта нет.'];
 }
 
-/* ---------- Measurement Protocol: валидатор (как /debug/mp/collect) ---------- */
+/* ---------- MP: валидационный сервер /debug/mp/collect ---------- */
 function validateMp(body) {
   var msgs = [];
-  if (!body.client_id && !body.app_instance_id) msgs.push({ fieldPath: 'client_id', validationCode: 'VALUE_REQUIRED', description: 'Measurement requires a client_id.' });
+  if (!body.client_id) msgs.push({ fieldPath: 'client_id', validationCode: 'VALUE_REQUIRED', description: 'Measurement requires a client_id.' });
   (body.events || []).forEach(function (ev, i) {
-    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(ev.name || '')) msgs.push({ fieldPath: 'events[' + i + '].name', validationCode: 'NAME_INVALID', description: 'Event name "' + (ev.name || '') + '" is invalid. Names must start with a letter and contain only letters, numbers, underscores (max 40).' });
-    else if (RESERVED_EVENTS.indexOf(ev.name) !== -1) msgs.push({ fieldPath: 'events[' + i + '].name', validationCode: 'NAME_RESERVED', description: 'Event name "' + ev.name + '" is reserved.' });
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(ev.name || '')) msgs.push({ fieldPath: 'events[' + i + '].name', validationCode: 'NAME_INVALID', description: 'Event name is invalid.' });
     Object.keys(ev.params || {}).forEach(function (p) {
       var v = ev.params[p];
-      if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(p)) msgs.push({ fieldPath: 'events[' + i + '].params.' + p, validationCode: 'NAME_INVALID', description: 'Param name "' + p + '" is invalid.' });
       if (typeof v === 'string' && v.length > 100) msgs.push({ fieldPath: 'events[' + i + '].params.' + p, validationCode: 'VALUE_INVALID', description: 'Param value is too long (max 100).' });
     });
   });
   return msgs;
 }
 
-/* ---------- выполнение Flow при изменении Лида ---------- */
-function updateLead(leadId, change) {
-  var lead = S.sf.leads.filter(function (l) { return l.Id === leadId; })[0];
-  if (!lead) return;
-  var prev = JSON.parse(JSON.stringify(lead));
-  if (change.type === 'status') lead.Status = change.to;
-  if (change.type === 'phone') lead.Phone = change.to;
-
-  var entry = {
-    ts: nowIso(), leadId: lead.Id, leadName: lead.FirstName + ' ' + lead.LastName, leadOrigin: lead.origin,
-    change: change.type, from: change.type === 'status' ? prev.Status : prev.Phone, to: change.to,
-    statusAfter: lead.Status, steps: [], sent: false, recorded: false
-  };
-  var f = S.sf.flowActive;
-  function step(kind, text) { entry.steps.push({ kind: kind, text: text }); }
-
-  if (!f) { step('skip', 'Нет активного Flow для объекта «Лид» — ничего не произошло.'); return finish(); }
-  if (f.object !== 'Lead') { step('skip', 'Flow «' + f.label + '» привязан к объекту «' + (f.object || '—') + '», а не к Лиду.'); return finish(); }
-  if (f.trigger === 'create') { step('skip', 'Flow запускается только при создании записи, а запись обновлена.'); return finish(); }
-
-  var metNow = conditionsMet(f, lead, prev);
-  if (!metNow) { step('skip', 'Условия входа не выполнены — Flow не запустился.'); return finish(); }
-  if (f.when === 'only_when_met' && conditionsMet(f, prev, null)) {
-    step('skip', 'Условия выполнялись и до изменения, а Flow запускается «только когда запись начинает соответствовать условиям» — Flow не запустился.');
-    return finish();
-  }
-  step('ok', 'Flow «' + f.label + '» (версия ' + f.version + ') запущен: условия входа выполнены.');
-
-  var evName = f.decision[lead.Status];
-  if (!evName) { step('skip', 'Решение: для статуса «' + lead.Status + '» исход по умолчанию — событие не отправляется.'); return finish(); }
-  step('ok', 'Решение: статус «' + lead.Status + '» → событие ' + evName + '.');
-
-  if (f.calloutPath !== 'async') {
-    step('error', 'Ошибка Flow: System.CalloutException: You have uncommitted work pending. Please commit or rollback before calling out. ' +
-      '(HTTP-запрос нельзя делать в той же транзакции, что и сохранение записи — нужен путь Run Asynchronously.)');
-    entry.error = 'uncommitted'; return finish();
-  }
-  step('ok', 'Путь Run Asynchronously: запрос выполняется после сохранения записи.');
-
-  if (!S.sf.extCred || !S.sf.permSet.assigned || !S.sf.permSet.principalAccess) {
-    step('error', 'Ошибка HTTP-запроса: We couldn\'t access the credential(s). You might not have the required permissions, or the external credential "' +
-      ((S.sf.extCred && S.sf.extCred.name) || 'GA4_External') + '" might not exist. (Проверь Permission Set с доступом к принципалу External Credential и его назначение.)');
-    entry.error = 'credential'; return finish();
-  }
-
-  var a = f.action, base = (S.sf.nc && S.sf.nc.url || '').replace(/\/+$/, '');
-  var path = a.path.trim(); if (path && path[0] !== '/') path = '/' + path;
-  var mid = resolveValue(a.query.measurement_id, lead), sec = resolveValue(a.query.api_secret, lead);
-  var url = base + path + '?measurement_id=' + encodeURIComponent(mid.value || '') + '&api_secret=' + encodeURIComponent(sec.value || '');
-
-  var params = {}, body = { client_id: '', events: [] };
-  var b = a.body;
-  var cid = resolveValue(b.client_id, lead); body.client_id = String(cid.value || '');
-  ['session_id', 'engagement_time_msec', 'lead_id', 'lead_source', 'value', 'currency', 'debug_mode'].forEach(function (k) {
-    if (!(b[k] || '').trim()) return;
-    var r = resolveValue(b[k], lead);
-    if (r.value === '' || r.value == null) return;
-    var v = r.value;
-    if (k === 'value' || k === 'engagement_time_msec') v = isNaN(+v) ? v : +v;
-    if (k === 'debug_mode') v = (v === 'true' || v === '1' || v === true) ? true : v;
-    params[k] = v;
-  });
-  body.events.push({ name: evName, params: params });
-  entry.request = { method: a.method, url: url, body: body };
-  entry.sent = true;
-
-  // ---- ответ «GA4» ----
-  var host = /^https:\/\/www\.google-analytics\.com$/.test(base);
-  var isDebug = path === '/debug/mp/collect';
-  if (!host) { entry.response = { status: 'Ошибка', text: 'Хост ' + (base || '(пусто)') + ' не отвечает как GA4. URL в Named Credential должен быть https://www.google-analytics.com' }; return finish(); }
-  if (a.method !== 'POST') { entry.response = { status: 405, text: 'Measurement Protocol принимает только POST.' }; return finish(); }
-  if (path !== '/mp/collect' && !isDebug) { entry.response = { status: 404, text: 'Неверный путь. Нужен /mp/collect.' }; return finish(); }
-
-  var validation = validateMp(body);
-  if (isDebug) {
-    entry.response = { status: 200, text: JSON.stringify({ validationMessages: validation }, null, 2), debug: true };
-    step('warn', 'Запрос ушёл на /debug/mp/collect: сервер проверил его, но НЕ записал данные. Для боевой отправки путь должен быть /mp/collect.');
-    return finish();
-  }
-  entry.response = { status: 204, text: 'No Content' };
-  var midOk = mid.value === GA_PROPERTY_MID;
-  var secOk = S.ga.secrets.some(function (s) { return s.value === sec.value; });
-  entry.validation = validation;
-  if (!midOk || !secOk || validation.length) {
-    entry.dropReason = !midOk ? 'measurement_id «' + (mid.value || '(пусто)') + '» не совпадает с потоком ' + GA_PROPERTY_MID
-      : !secOk ? 'api_secret не найден среди секретов потока в GA4'
-      : validation.map(function (m) { return m.description; }).join(' ');
-    step('warn', 'GA4 ответил 204, но событие НЕ записано: ' + entry.dropReason + '. /mp/collect всегда отвечает 2xx — ошибки видно только через /debug/mp/collect.');
-    return finish();
-  }
-  entry.recorded = true;
-  S.gaReceived.push({
-    ts: entry.ts, name: evName, client_id: body.client_id, params: params, leadId: lead.Id,
-    utm_source: leadValue(lead, (fieldBy(FIELD_RE.utm_source) || {}).api) || '',
-    utm_medium: leadValue(lead, (fieldBy(FIELD_RE.utm_medium) || {}).api) || ''
-  });
-  step('ok', 'GA4 принял событие ' + evName + ' для client_id ' + body.client_id + '.');
-  if (S.ga.realSend) sendReal(url, body, entry);
-  return finish();
-
-  function finish() { S.log.unshift(entry); saveState(); return entry; }
-}
-
-/* Реальная отправка в GA4 (если в шаге 2 вставлен настоящий секрет) */
-function sendReal(url, body, entry) {
-  try {
-    fetch(url, { method: 'POST', mode: 'no-cors', body: JSON.stringify(body) });
-    entry.realSent = true;
-  } catch (e) { entry.realSent = false; }
-}
-
-/* ---------- тест-кейсы (по журналу запусков) ---------- */
-function testResults() {
-  var webLeads = S.sf.leads.filter(function (l) { return l.origin === 'web'; });
-  function ga(name) { return S.gaReceived.filter(function (e) { return e.name === name; }); }
-  var t = [];
-
-  var q = ga('qualify_lead').filter(function (e) {
-    var l = S.sf.leads.filter(function (x) { return x.Id === e.leadId; })[0];
-    return l && l.origin === 'web';
-  });
-  var qOk = q.filter(function (e) {
-    var l = S.sf.leads.filter(function (x) { return x.Id === e.leadId; })[0];
-    return e.client_id && e.client_id === (l.raw && l.raw.ga_client_id) && e.params.session_id && String(e.params.session_id) === String(l.raw.ga_session_id) && e.params.engagement_time_msec;
-  });
-  t.push({
-    id: 'T1', title: 'Лид с сайта → «Квалифицирован» → в GA4 приходит qualify_lead с его client_id и session_id',
-    status: qOk.length ? 'pass' : q.length ? 'fail' : 'todo',
-    note: qOk.length ? 'Событие пришло с правильными client_id, session_id и engagement_time_msec.'
-      : q.length ? 'qualify_lead пришёл, но client_id / session_id не совпадают с cookie посетителя или нет engagement_time_msec. Проверь сопоставление Web-to-Lead и тело запроса.'
-      : webLeads.length ? 'Открой лид с сайта и переведи его в статус «Квалифицирован».' : 'Сначала нужен лид с сайта (миссии 1 и 5).'
-  });
-
-  var phoneRuns = S.log.filter(function (l) { return l.change === 'phone' && l.statusAfter === 'Qualified'; });
-  var dupSent = phoneRuns.filter(function (l) { return l.sent; });
-  t.push({
-    id: 'T2', title: 'Правка телефона у квалифицированного лида НЕ отправляет событие повторно',
-    status: !phoneRuns.length ? 'todo' : dupSent.length ? 'fail' : 'pass',
-    note: !phoneRuns.length ? 'Открой квалифицированный лид и нажми «Изменить телефон».'
-      : dupSent.length ? 'Дубль! Flow снова отправил событие. Подумай над условиями входа: запускаться нужно только когда статус ИЗМЕНИЛСЯ.'
-      : 'Дубля нет — Flow реагирует только на смену статуса.'
-  });
-
-  var tradeRuns = S.log.filter(function (l) { return l.leadOrigin === 'manual' && l.change === 'status'; });
-  var tradeSent = tradeRuns.filter(function (l) { return l.sent; });
-  t.push({
-    id: 'T3', title: 'Лид без client_id (с выставки) не порождает запрос в GA4',
-    status: !tradeRuns.length ? 'todo' : tradeSent.length ? 'fail' : 'pass',
-    note: !tradeRuns.length ? 'Смени статус у лида «Олег Петров (ТД «Выставка»)».'
-      : tradeSent.length ? 'Ушёл запрос с пустым client_id — GA4 его молча отбросил. Добавь условие входа: поле client_id не пустое.'
-      : 'Отлично: Flow даже не пытается отправить «пустой» запрос.'
-  });
-
-  var dq = ga('disqualify_lead');
-  t.push({ id: 'T4', title: 'Лид → «Не квалифицирован» → disqualify_lead', status: dq.length ? 'pass' : 'todo',
-    note: dq.length ? 'Событие получено.' : 'Переведи лид с сайта в статус «Не квалифицирован» (можно новый тестовый лид).' });
-
-  var cc = ga('close_convert_lead');
-  var ccOk = cc.filter(function (e) { return +e.params.value > 0 && e.params.currency === 'USD'; });
-  t.push({ id: 'T5', title: 'Лид → «Конвертирован» → close_convert_lead с value и currency',
-    status: ccOk.length ? 'pass' : cc.length ? 'fail' : 'todo',
-    note: ccOk.length ? 'Событие пришло с ценностью — GA4 посчитает доход по лидам.'
-      : cc.length ? 'Событие пришло, но без value > 0 или без currency = USD.' : 'Переведи лид в статус «Конвертирован».' });
-  return t;
-}
+/* ---------- Учебный набор данных для шагов 9–11 ---------- */
+var SAMPLE = {
+  submissions: [
+    { submission_id: 'sub_A1', client_id: '111.1', date: '2026-09-02', source: 'google / cpc', first_source: 'google / cpc', lead: '00QA', qualified: true },
+    { submission_id: 'sub_A2', client_id: '111.1', date: '2026-09-20', source: 'newsletter / email', first_source: 'google / cpc', lead: '00QA', qualified: true },
+    { submission_id: 'sub_B1', client_id: '222.2', date: '2026-09-05', source: 'facebook / paid_social', first_source: 'facebook / paid_social', lead: '00QB', qualified: false },
+    { submission_id: 'sub_C1', client_id: '333.3', date: '2026-09-11', source: 'google / organic', first_source: 'google / organic', lead: '00QC', qualified: true }
+  ],
+  opps: [
+    { opportunity_id: '006X', lead: '00QA', main_submission: 'sub_A1', client_id: '111.1', stage: 'Closed Won', amount: 30000, close_date: '2026-10-15' },
+    { opportunity_id: '006Y', lead: '00QC', main_submission: 'sub_C1', client_id: '333.3', stage: 'Closed Lost', amount: 8000, close_date: '2026-10-20' }
+  ],
+  payments: [
+    { payment_id: 'pay_1', opportunity_id: '006X', client_id: '111.1', date: '2026-10-20', amount: 5000, status: 'оплачено' },
+    { payment_id: 'pay_2', opportunity_id: '006X', client_id: '111.1', date: '2026-11-01', amount: 10000, status: 'оплачено' },
+    { payment_id: 'pay_2', opportunity_id: '006X', client_id: '111.1', date: '2026-11-01', amount: 10000, status: 'оплачено', dup: true },
+    { payment_id: 'ref_1', opportunity_id: '006X', client_id: '111.1', date: '2026-11-03', amount: -2000, status: 'возврат', refund_of: 'pay_1' }
+  ]
+};

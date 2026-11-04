@@ -361,82 +361,138 @@ pages.about = function () {
   initNewsletter('about-newsletter-form', 'about-newsletter-success');
 };
 
-/* ---------- B2B lead form (→ Salesforce Web-to-Lead, симуляция) ---------- */
-// Метки кампании запоминаем при входе на сайт (на время сессии), чтобы они дожили до формы
-function captureAttribution() {
+/* ---------- B2B-заявка по схеме «сайт → свой сервер → Salesforce» (симуляция) ----------
+   Шаг 3 документа: запоминаем страницы и источник визита.
+   Шаг 4: заявка уходит на «сервер» POST /api/leads (здесь — localStorage gc_server_db), он выдаёт submission_id.
+   Шаг 6: только после ответа «сохранено» — dataLayer lead_form_success (без имени/email/телефона). */
+var SITE_ID = 'main_site', FORM_ID = 'business_contact', SITE_LANGUAGE = 'ru';
+var CTA_TTL_MS = 30 * 60 * 1000;
+
+function readJSON(store, key) { try { return JSON.parse(store.getItem(key)); } catch (e) { return null; } }
+function externalReferrer() {
+  try { return document.referrer && new URL(document.referrer).host !== location.host ? document.referrer : ''; } catch (e) { return ''; }
+}
+function consentDenied() { return /(?:^|; )gc_consent_analytics=denied/.test(document.cookie); }
+
+// Первое касание (не перезаписывается) и касание текущего визита (вкладка браузера = визит, упрощённо)
+function captureTouches() {
   var q = new URLSearchParams(location.search);
-  if (q.get('utm_source') || q.get('gclid')) {
-    sessionStorage.setItem('gc_attribution', JSON.stringify({
-      utm_source: q.get('utm_source') || '', utm_medium: q.get('utm_medium') || '',
-      utm_campaign: q.get('utm_campaign') || '', gclid: q.get('gclid') || ''
-    }));
+  var utm = { source: q.get('utm_source') || '', medium: q.get('utm_medium') || '', campaign: q.get('utm_campaign') || '' };
+  var touch = { landing_path: location.pathname, ts: new Date().toISOString(), utm: utm, referrer: externalReferrer() };
+  if (!readJSON(localStorage, 'gc_first_touch')) localStorage.setItem('gc_first_touch', JSON.stringify(touch));
+  var session = readJSON(sessionStorage, 'gc_session_touch');
+  // Новый визит: начало сессии или переход по новой рекламной ссылке
+  if (!session || (utm.source && utm.source !== session.utm.source)) sessionStorage.setItem('gc_session_touch', JSON.stringify(touch));
+}
+
+// Клик по ссылке, ведущей на форму, — запоминаем страницу кнопки (cta_origin_path) на 30 минут
+document.addEventListener('click', function (e) {
+  var a = e.target.closest && e.target.closest('a[href]');
+  if (!a || document.body.dataset.page === 'lead') return;
+  var url; try { url = new URL(a.getAttribute('href'), location.href); } catch (err) { return; }
+  if (url.host === location.host && /\/lead\.html$/.test(url.pathname)) {
+    sessionStorage.setItem('gc_cta', JSON.stringify({ path: location.pathname, ts: Date.now() }));
   }
+}, true);
+function ctaOrigin() {
+  var c = readJSON(sessionStorage, 'gc_cta');
+  return c && Date.now() - c.ts < CTA_TTL_MS ? c.path : '';
 }
-function getAttribution() {
-  try { return JSON.parse(sessionStorage.getItem('gc_attribution')) || {}; } catch (e) { return {}; }
+
+// client_id и session_id через gtag('get') с таймаутом (cookie GA4 вручную не разбираем)
+function getGaIds(timeoutMs) {
+  return new Promise(function (resolve) {
+    var out = { client_id: '', session_id: '' }, left = 2, done = false;
+    function finish() { if (!done) { done = true; resolve(out); } }
+    if (consentDenied()) return finish();
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    var mid = (window.SITE_CONFIG && SITE_CONFIG.GA4_ID) || '';
+    gtag('get', mid, 'client_id', function (v) { out.client_id = v ? String(v) : ''; if (--left === 0) finish(); });
+    gtag('get', mid, 'session_id', function (v) { out.session_id = v ? String(v) : ''; if (--left === 0) finish(); });
+    setTimeout(finish, timeoutMs);
+  });
 }
-// client_id из cookie _ga: "GA1.1.1234567890.1730000000" → "1234567890.1730000000"
-function getGaClientId() {
-  var m = document.cookie.match(/(?:^|; )_ga=([^;]*)/);
-  if (!m) return '';
-  var parts = m[1].split('.');
-  return parts.length >= 4 ? parts[2] + '.' + parts[3] : '';
-}
-// session_id из cookie _ga_<ID потока>: "GS1.1.1730712345.3..." или "GS2.1.s1730712345$o3$..."
-function getGaSessionId() {
-  var id = ((window.SITE_CONFIG && SITE_CONFIG.GA4_ID) || '').replace(/^G-/, '');
-  var re = id ? new RegExp('(?:^|; )_ga_' + id + '=([^;]*)') : /(?:^|; )_ga_[A-Z0-9]+=([^;]*)/;
-  var m = document.cookie.match(re);
-  if (!m) return '';
-  var v = decodeURIComponent(m[1]);
-  var gs2 = v.match(/^GS2\.\d+\.s(\d+)/);
-  if (gs2) return gs2[1];
-  var parts = v.split('.');
-  return parts.length >= 3 ? parts[2] : '';
+
+// «Сервер»: POST /api/leads. Идемпотентность — один ключ на одно заполнение формы
+function apiPostLead(payload, idemKey) {
+  return new Promise(function (resolve) {
+    setTimeout(function () {
+      var db = readJSON(localStorage, 'gc_server_db') || { submissions: [], requests: [] };
+      var existing = db.submissions.filter(function (s) { return s.idem_key === idemKey; })[0];
+      var sub = existing || {
+        submission_id: 'sub_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+        idem_key: idemKey, received_at: new Date().toISOString(),
+        contact: payload.contact, context: payload.context,
+        delivery: { status: 'pending', attempts: 0, sf_lead_id: '', next_try_min: 0, log: [] }
+      };
+      if (!existing) db.submissions.push(sub);
+      db.requests.push({ ts: new Date().toISOString(), idem_key: idemKey, submission_id: sub.submission_id, duplicate: !!existing });
+      localStorage.setItem('gc_server_db', JSON.stringify(db));
+      resolve({ submission_id: sub.submission_id, duplicate: !!existing });
+    }, 700);
+  });
 }
 
 pages.lead = function () {
   var form = $('#b2b-lead-form');
-  function fillHidden() {
-    var a = getAttribution();
-    $('#ga_client_id').value = getGaClientId();
-    $('#ga_session_id').value = getGaSessionId();
-    $('#gclid').value = a.gclid || '';
-    $('#utm_source').value = a.utm_source || '';
-    $('#utm_medium').value = a.utm_medium || '';
-    $('#utm_campaign').value = a.utm_campaign || '';
-    $('#hidden-preview').innerHTML = $all('input[type=hidden]', form).map(function (i) {
-      return '<div><code>' + i.name + '</code> = <b>' + (i.value || '<span style="color:#b3403a">(пусто)</span>') + '</b></div>';
-    }).join('');
+  var idsPromise = getGaIds(1500);   // запрашиваем заранее, ждём не дольше 1,5 с
+  var idemKey = null;
+
+  function buildContext(ids) {
+    var first = readJSON(localStorage, 'gc_first_touch') || {}, sess = readJSON(sessionStorage, 'gc_session_touch') || {};
+    var denied = consentDenied();
+    return {
+      site_id: SITE_ID, form_id: FORM_ID, site_language: SITE_LANGUAGE,
+      ga_client_id: denied ? '' : ids.client_id, ga_session_id: denied ? '' : ids.session_id,
+      ga_measurement_id: (window.SITE_CONFIG && SITE_CONFIG.GA4_ID) || '',
+      first_landing_path: first.landing_path || '', session_landing_path: sess.landing_path || '',
+      form_page_path: location.pathname, cta_origin_path: ctaOrigin(),
+      first_utm: first.utm || { source: '', medium: '', campaign: '' }, submission_utm: sess.utm || { source: '', medium: '', campaign: '' },
+      first_referrer: first.referrer || '', session_referrer: sess.referrer || '',
+      consent_analytics: !denied, submitted_at: new Date().toISOString()
+    };
   }
-  fillHidden();
-  $('#show-hidden').addEventListener('change', function () { fillHidden(); $('#hidden-preview').hidden = !this.checked; });
+  function showPreview() {
+    idsPromise.then(function (ids) { $('#hidden-preview').textContent = JSON.stringify(buildContext(ids), null, 2); });
+  }
+  $('#show-hidden').addEventListener('change', function () { showPreview(); $('#hidden-preview').hidden = !this.checked; });
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
-    if (!validate(form)) { window.dataLayer.push({ event: 'form_error', form_name: 'b2b_wholesale' }); return; }
-    fillHidden();   // cookie GA могли появиться позже загрузки страницы — читаем в момент отправки
-    var data = {};
-    $all('input, select, textarea', form).forEach(function (i) { if (i.name) data[i.name] = i.value.trim(); });
-    data.web_id = 'W-' + Date.now().toString(36).toUpperCase();
-    data.submitted_at = new Date().toISOString();
-    data.page = location.pathname;
-
-    // «Отправка» в Salesforce Web-to-Lead (симуляция: складываем в localStorage, лаборатория их заберёт)
-    var outbox = []; try { outbox = JSON.parse(localStorage.getItem('gc_sf_outbox')) || []; } catch (err) {}
-    outbox.push(data);
-    localStorage.setItem('gc_sf_outbox', JSON.stringify(outbox));
-
-    window.dataLayer.push({
-      event: 'generate_lead', form_name: 'b2b_wholesale', lead_source: 'website',
-      value: +data.budget, currency: CURRENCY
+    if (!validate(form)) { window.dataLayer.push({ event: 'form_error', form_name: FORM_ID }); return; }
+    if (!idemKey) idemKey = 'idem_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    var btn = form.querySelector('button[type=submit]'); btn.textContent = 'Отправка…';
+    var contact = {};
+    $all('input, select, textarea', form).forEach(function (i) { if (i.name) contact[i.name] = i.value.trim(); });
+    idsPromise.then(function (ids) {
+      var payload = { contact: contact, context: buildContext(ids) };
+      return apiPostLead(payload, idemKey).then(function (res) { onSaved(res, payload.context); });
     });
-    form.outerHTML = '<div class="form-card" id="b2b-lead-success"><p class="success">✅ Заявка отправлена! Менеджер свяжется с вами.</p>' +
-      '<p>🧪 Учебная заявка <b>' + data.web_id + '</b> ушла в «Salesforce». ' +
-      (data.ga_client_id ? 'GA client_id: <code>' + data.ga_client_id + '</code>' :
-        '<b style="color:#b3403a">client_id пустой</b> — cookie _ga не найдена (GA4 не загрузился, блокировщик рекламы или отказ от cookie).') +
-      '</p><p><a class="btn" href="lab/">Открыть Лабораторию →</a></p></div>';
   });
+
+  function onSaved(res, ctx) {
+    // Событие — только после ответа сервера и только один раз на submission_id
+    var tracked = readJSON(localStorage, 'gc_tracked_submissions') || [];
+    if (tracked.indexOf(res.submission_id) === -1) {
+      window.dataLayer.push({
+        event: 'lead_form_success', lead_submission_id: res.submission_id, form_id: FORM_ID,
+        first_landing_path: ctx.first_landing_path, session_landing_path: ctx.session_landing_path,
+        form_page_path: ctx.form_page_path, cta_origin_path: ctx.cta_origin_path, site_id: SITE_ID, site_language: SITE_LANGUAGE
+      });
+      tracked.push(res.submission_id);
+      localStorage.setItem('gc_tracked_submissions', JSON.stringify(tracked));
+    }
+    sessionStorage.removeItem('gc_cta');
+    var box = $('#b2b-lead-form') || $('#b2b-lead-success');
+    if (box && box.id === 'b2b-lead-form') {
+      box.outerHTML = '<div class="form-card" id="b2b-lead-success"><p class="success">✅ Заявка отправлена! Менеджер свяжется с вами.</p>' +
+        '<p>🧪 Сервер сохранил заявку <b>' + res.submission_id + '</b>. ' +
+        (ctx.ga_client_id ? 'GA client_id: <code>' + ctx.ga_client_id + '</code>' : '<b style="color:#b3403a">client_id пустой</b> — GA4 не ответил за 1,5 с (не загрузился, блокировщик или отказ от cookie). Заявка всё равно сохранена — так и должно быть.') +
+        '</p><p class="dup-note" id="dup-note"></p><p><a class="btn" href="lab/">Открыть Лабораторию →</a></p></div>';
+    } else if (res.duplicate && $('#dup-note')) {
+      $('#dup-note').textContent = '↺ Повторный запрос с тем же ключом: сервер вернул тот же номер ' + res.submission_id + ', дубль не создан.';
+    }
+  }
 };
 
 /* ---------- validation ---------- */
@@ -565,7 +621,7 @@ function initConsentBanner() {
 
 /* ---------- start ---------- */
 document.addEventListener('DOMContentLoaded', function () {
-  captureAttribution();
+  captureTouches();
   renderLayout();
   var page = document.body.dataset.page;
   if (pages[page]) pages[page]();

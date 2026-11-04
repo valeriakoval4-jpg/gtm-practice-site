@@ -34,25 +34,16 @@
         <div class="field full"><label for="description">Что нужно озеленить?</label><textarea id="description" name="description" rows="3"></textarea></div>
       </div>
 
-      <!-- Скрытые поля: заполняются скриптом при отправке.
-           Их значения уходят в Salesforce вместе с заявкой (Web-to-Lead) -->
-      <input type="hidden" name="ga_client_id" id="ga_client_id">
-      <input type="hidden" name="ga_session_id" id="ga_session_id">
-      <input type="hidden" name="gclid" id="gclid">
-      <input type="hidden" name="utm_source" id="utm_source">
-      <input type="hidden" name="utm_medium" id="utm_medium">
-      <input type="hidden" name="utm_campaign" id="utm_campaign">
-
       <p><button class="btn" type="submit">Отправить заявку</button></p>
-      <label class="dev-toggle"><input type="checkbox" id="show-hidden"> 🛠 Показать скрытые поля (режим разработчика)</label>
+      <label class="dev-toggle"><input type="checkbox" id="show-hidden"> 🛠 Показать, что уйдёт на сервер в блоке context (режим разработчика)</label>
       <div id="hidden-preview" class="hidden-preview" hidden></div>
     </form>
     <aside class="order-box">
       <h3 style="margin-top:0">🧪 Это часть учебной цепочки</h3>
-      <p>Заявка не уходит в настоящий Salesforce — она сохраняется в браузере и появляется в
+      <p>Заявка не уходит в настоящий Salesforce — учебный сервер хранит её в браузере, а доставку в Salesforce ты увидишь в
         <a href="lab/">Лаборатории GA4 ⇄ Salesforce</a>.</p>
-      <p>Для теста открой эту страницу с метками кампании:</p>
-      <p><a href="lead.html?utm_source=google&amp;utm_medium=cpc&amp;utm_campaign=b2b_autumn&amp;gclid=TeSt-GCLID-123" id="utm-test-link">lead.html?utm_source=google&amp;utm_medium=cpc&amp;…</a></p>
+      <p>Схема как в документе: форма → <code>POST /api/leads</code> (учебный сервер) → Salesforce.
+        После ответа сервера в dataLayer уходит <code>lead_form_success</code> — без имени, email и телефона.</p>
     </aside>
   </div>
 </div></section>
